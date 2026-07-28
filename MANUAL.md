@@ -4,7 +4,7 @@ A complete, practical guide to installing, running, training, exporting, and dep
 its flagship detector **LOFOP-Detect**. This is the hands-on manual; for architecture and design
 rationale see [`docs/architecture.md`](docs/architecture.md) and the per-module docs it links.
 
-- **Version:** 1.1.2
+- **Version:** 1.2.0
 - **Python:** 3.9+
 - **Platforms:** Linux, macOS, Windows
 
@@ -85,8 +85,8 @@ Maintainers: release steps (PyPI + AUR) are in [`docs/packaging.md`](packaging.m
 ## 3. Verify your install
 
 ```bash
-lofop version                  # prints 1.1.2
-python -m pytest               # runs the test suite (259 passed, 3 skipped without GPU/TensorBoard)
+lofop version                  # prints 1.2.0
+python -m pytest               # runs the test suite (308 passed, 3 skipped without GPU/TensorBoard)
 ```
 
 Then run the self-contained demo — it generates its own data, trains LOFOP-Detect end to end, and
@@ -282,6 +282,25 @@ The detector family lives in `lofop/configs/lofop-detect/`:
 
 Each variant only overrides widths/depths; the architecture is identical. Build one with
 `HUB.build(Config.load("lofop/configs/lofop-detect/s.yaml").model)`.
+
+Every size also has a task variant on the same detector:
+
+- `n-seg.yaml` / `s-seg.yaml` / `ex-seg.yaml` -- instance segmentation
+  (`model/LofopSegment`): a prototype mask branch trained from COCO polygon
+  annotations (plain boxes work as a coarse fallback). `predict` adds a
+  `masks` field; checkpoints are named by the variant, e.g.
+  `lofop-detect-n-seg.pt`.
+- `n-pose.yaml` / `s-pose.yaml` / `ex-pose.yaml` -- pose estimation
+  (`model/LofopPose`): per-detection keypoints trained from COCO keypoint
+  annotations. `num_keypoints` defaults to 17 (COCO person) and is
+  configurable (`Detector(..., num_keypoints=K)`). `predict` adds a
+  `keypoints` field of `(x, y, visibility)` rows.
+
+The SDK trains them exactly like detection -- mask/keypoint targets are read
+automatically from the dataset's annotations. Note: horizontal-flip
+augmentation is disabled for pose training (flipping would need left/right
+keypoint swapping), and `strong_augment` is not yet supported for seg/pose.
+ONNX export currently covers detection models only.
 
 ### Training config
 

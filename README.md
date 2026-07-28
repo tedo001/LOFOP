@@ -10,11 +10,13 @@ original detector: **LOFOP-Detect**. It is an independent design and implementat
 modern computer-vision engineering practices while remaining self-contained.
 
 > **Status:** published on [PyPI](https://pypi.org/project/lofop/) (`pip install lofop`).
-> Core engine, data subsystem (with visualization), cross-platform native ops, LOFOP-Detect
-> models, training engine (schedulers, early stopping, strong augmentation), full CLI,
-> Python SDK, and verified ONNX (fixed + dynamic shapes) / TensorRT export. 259 tests
-> passing with a coverage-gated CI. See [`docs/architecture.md`](docs/architecture.md)
-> for the subsystem map and [`CHANGELOG.md`](CHANGELOG.md) for release history.
+> Core engine, data subsystem (with visualization), three-tier native ops (Python /
+> C++ / optional CUDA), the LOFOP-Detect family (detection + segmentation + pose
+> variants), training engine (schedulers, early stopping, strong augmentation), full
+> CLI, Python SDK, and verified ONNX (fixed + dynamic shapes) / TensorRT export.
+> 308 tests passing with a coverage-gated CI. See
+> [`docs/architecture.md`](docs/architecture.md) for the subsystem map and
+> [`CHANGELOG.md`](CHANGELOG.md) for release history.
 
 📖 **New here? Read the [Operator's Manual](MANUAL.md)** — a complete, step-by-step guide to
 installing, training, exporting, deploying, and troubleshooting LOFOP.
@@ -28,6 +30,12 @@ installing, training, exporting, deploying, and troubleshooting LOFOP.
   attention only on the cheap stride-32 level, ApexHead with an IoU-quality branch, dynamic top-k
   label assignment). Variants are pure config: `n` = 1.3M params, `s` = 3.8M, `ex` = 20.1M.
   Design + trade-offs: [`docs/lofop-detect.md`](docs/lofop-detect.md).
+- **Instance segmentation** — `lofop-detect-{n,s,ex}-seg`: a prototype-based mask branch
+  (StencilHead) on the same detector; trains from COCO polygons through the same SDK/CLI and
+  attaches per-detection masks at inference.
+- **Pose estimation** — `lofop-detect-{n,s,ex}-pose`: an offset-based keypoint branch
+  (VertexHead, `num_keypoints` configurable); trains from COCO keypoints and attaches
+  per-detection `(x, y, visibility)` skeletons.
 - **Python SDK** — `from lofop import Detector`: build, train, predict (boxes in original image
   coordinates), evaluate, and export through one documented class. Full reference:
   [`docs/sdk.md`](docs/sdk.md).
@@ -36,10 +44,11 @@ installing, training, exporting, deploying, and troubleshooting LOFOP.
   gradient clipping, atomic checkpointing with resume, an opt-in strong-augmentation recipe
   (2x2 mosaic + color jitter, original tensor-native ops), and a COCO-protocol evaluator
   (mAP@50, mAP@50:95, precision, recall, F1, per-class precision/recall, confusion matrix).
-- **Cross-platform native ops** — IoU and class-aware NMS kernels (20-200x over pure Python) with a
-  verified-identical Python fallback, so a compiler is never required. The C++ path builds with
-  g++/clang on Linux/macOS and MinGW/clang/MSVC on Windows; `lofop.ops.backend()` reports which is
-  active.
+- **Three-tier native ops** — IoU, class-aware NMS, Soft-NMS, and dense decode with a
+  verified-identical Python fallback (a compiler is never required), a C++ fast path (20-200x;
+  g++/clang on Linux/macOS, MinGW/clang/MSVC on Windows), and an optional CUDA tier
+  (`build_native(cuda=True)`, needs nvcc) for the parallel ops on NVIDIA GPUs.
+  `lofop.ops.backend()` reports the active tier: `cuda` > `native` > `python`.
 - **Benchmarking** — `lofop benchmark` renders the standard metric table (mAP, FPS, params,
   FLOPs, model size) with optional CSV/JSON output (`--results-dir`), and never prints a
   number that was not actually measured.
@@ -187,7 +196,7 @@ vulnerabilities. Bug reports and feature requests use the issue templates.
 ## Roadmap
 
 Ordered by expected return: published pretrained checkpoints (GPU training runs),
-quality-aware Soft-NMS in the native kernel, letterboxing, a torch-free tracking module,
+letterboxing, a torch-free tracking module, ONNX export for the segmentation/pose variants,
 then inference sources (video/RTSP/webcam), OpenVINO engines, and REST serving. The full
 subsystem map with per-phase status lives in [`docs/architecture.md`](docs/architecture.md).
 

@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-28
+
+### Added
+- Instance segmentation: `lofop-detect-{n,s,ex}-seg` variants
+  (`model/LofopSegment` + the prototype-based `head/StencilHead`). Trains
+  from COCO polygon annotations (or plain boxes as a fallback) through the
+  same SDK/CLI, and `predict` attaches per-detection masks.
+- Pose estimation: `lofop-detect-{n,s,ex}-pose` variants (`model/LofopPose`
+  + the offset-based `head/VertexHead`, `num_keypoints` configurable).
+  Trains from COCO keypoint annotations; `predict` attaches per-detection
+  `(x, y, visibility)` keypoints.
+- Data: `BoxAnnotation` optionally carries `segmentation` polygons and
+  `keypoints`; the COCO adapter round-trips both. `DetectionTorchDataset`
+  gains `include_masks` / `include_keypoints` targets.
+- Ops: `soft_nms` (gaussian/linear score decay, C++ kernel + verified
+  Python reference) and `decode_dense` (native dense best-class decode,
+  zero-copy for numpy/tensor inputs); `postprocess_dense(soft=True)`
+  enables Soft-NMS on the torch-free deployment path.
+- Ops: optional CUDA tier (`build_native(cuda=True)`, needs nvcc) for
+  pairwise IoU and dense decode on NVIDIA GPUs; `backend()` now reports
+  `cuda`/`native`/`python`, always falling back cleanly.
+
+### Changed
+- ONNX export raises a clear error for segmentation/pose models (their
+  export lands in a later release); detection export is unchanged.
+
 ## [1.1.3] - 2026-07-16
 
 ### Added
@@ -57,7 +83,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Python SDK (`Detector`) and the `lofop` CLI.
 - Packaging for PyPI (wheel/sdist) and AUR; CI and release workflows.
 
-[Unreleased]: https://github.com/tedo001/LOFOP/compare/v1.1.3...HEAD
+[Unreleased]: https://github.com/tedo001/LOFOP/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/tedo001/LOFOP/compare/v1.1.3...v1.2.0
 [1.1.3]: https://github.com/tedo001/LOFOP/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/tedo001/LOFOP/compare/v0.1.0...v1.1.2
 [0.1.0]: https://github.com/tedo001/LOFOP/releases/tag/v0.1.0
