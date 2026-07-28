@@ -169,7 +169,7 @@ docker/          # CPU, CUDA, and ONNX Runtime images
 docs/            # architecture, per-module references, LOFOP-Detect design doc
 benchmarks/      # reusable performance measurement scripts
 examples/        # end-to-end runnable demos
-tests/           # pytest suite mirroring the package layout (177 tests)
+tests/           # pytest suite mirroring the package layout (308 tests)
 ```
 
 ## Development
