@@ -11,6 +11,7 @@
 // framework runtime. Boxes are float32 xyxy, row-major.
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <numeric>
 #include <vector>
@@ -99,6 +100,92 @@ int32_t lofop_nms(const float* boxes, const float* scores, int32_t n, float iou_
         }
     }
     return kept;
+}
+
+// Soft-NMS. Instead of hard-dropping boxes that overlap a kept box, decay
+// their scores -- linear (method 0): s *= 1 - iou when iou > iou_threshold;
+// gaussian (method 1): s *= exp(-iou^2 / sigma). Boxes whose decayed score
+// falls below `score_threshold` are discarded. Writes kept indices into
+// `keep_out` and their final scores into `scores_out` (both sized >= n, kept
+// in selection order, score-descending); returns how many were kept.
+int32_t lofop_soft_nms(const float* boxes, const float* scores, int32_t n, float iou_threshold,
+                       float sigma, float score_threshold, int32_t method, int32_t max_keep,
+                       int32_t* keep_out, float* scores_out) {
+    std::vector<float> live_scores(scores, scores + n);
+    std::vector<float> areas(static_cast<size_t>(n));
+    for (int32_t i = 0; i < n; ++i) {
+        areas[static_cast<size_t>(i)] = box_area(boxes + 4 * i);
+    }
+    std::vector<char> done(static_cast<size_t>(n), 0);
+    int32_t kept = 0;
+    for (;;) {
+        int32_t best = -1;
+        float best_score = score_threshold;
+        for (int32_t i = 0; i < n; ++i) {
+            if (!done[static_cast<size_t>(i)] && live_scores[static_cast<size_t>(i)] > best_score) {
+                best = i;
+                best_score = live_scores[static_cast<size_t>(i)];
+            }
+        }
+        if (best < 0) {
+            break;
+        }
+        done[static_cast<size_t>(best)] = 1;
+        keep_out[kept] = best;
+        scores_out[kept] = best_score;
+        ++kept;
+        if (max_keep > 0 && kept >= max_keep) {
+            break;
+        }
+        const float* box_b = boxes + 4 * best;
+        const float area_b = areas[static_cast<size_t>(best)];
+        for (int32_t j = 0; j < n; ++j) {
+            if (done[static_cast<size_t>(j)]) {
+                continue;
+            }
+            const float iou =
+                pair_iou(box_b, boxes + 4 * j, area_b, areas[static_cast<size_t>(j)]);
+            if (iou <= 0.0f) {
+                continue;
+            }
+            float weight = 1.0f;
+            if (method == 1) {
+                weight = std::exp(-(iou * iou) / sigma);
+            } else if (iou > iou_threshold) {
+                weight = 1.0f - iou;
+            }
+            live_scores[static_cast<size_t>(j)] *= weight;
+        }
+    }
+    return kept;
+}
+
+// Dense decode: per candidate row of an (n, num_classes) score matrix, find
+// the best class; emit the candidate when that score clears `threshold`.
+// Writes candidate row indices, class ids, and scores into the out arrays
+// (sized >= n); returns how many candidates were emitted. This replaces the
+// O(n * c) Python loop in torch-free deployment post-processing.
+int32_t lofop_decode_dense(const float* scores, int32_t n, int32_t num_classes, float threshold,
+                           int32_t* index_out, int32_t* label_out, float* score_out) {
+    int32_t count = 0;
+    for (int32_t i = 0; i < n; ++i) {
+        const float* row = scores + static_cast<int64_t>(i) * num_classes;
+        int32_t best = 0;
+        float best_score = row[0];
+        for (int32_t c = 1; c < num_classes; ++c) {
+            if (row[c] > best_score) {
+                best = c;
+                best_score = row[c];
+            }
+        }
+        if (best_score > threshold) {
+            index_out[count] = i;
+            label_out[count] = best;
+            score_out[count] = best_score;
+            ++count;
+        }
+    }
+    return count;
 }
 
 }  // extern "C"

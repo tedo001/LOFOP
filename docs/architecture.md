@@ -31,6 +31,7 @@ and the build order. Module-level documents (e.g. [`core-engine.md`](core-engine
 | 2 | `lofop.data` | Canonical dataset model, COCO/YOLO/VOC adapters, converter, validator, statistics | **Done** |
 | 2b | `lofop.data` | Torch data bridge + augmentation (flip; opt-in mosaic + color jitter); letterboxing/caching planned | **Done** (letterbox planned) |
 | 3 | `lofop.models` | LOFOP-Detect: RidgeNet, DeltaFusion, ApexHead, losses, dynamic assignment | **Done** (see docs/lofop-detect.md) |
+| 3b | `lofop.models` | Task variants on the same detector: LofopSegment (StencilHead prototype masks), LofopPose (VertexHead keypoints) | **Done** (ONNX export planned) |
 | 4 | `lofop.training` | Trainer (AMP, EMA, cosine schedule, resume), COCO-protocol evaluator, checkpoints, torch data bridge | **Done** (DDP path present, not CI-exercised) |
 | 5 | `lofop.inference` | Image/video/stream predictors, batching, RTSP/webcam sources | Planned |
 | 6 | `lofop.deploy` | ONNX (fixed + dynamic shapes, verified) + TensorRT export, torch-free post-processing; OpenVINO/REST planned | **Done** (OpenVINO/REST planned) |
@@ -38,7 +39,7 @@ and the build order. Module-level documents (e.g. [`core-engine.md`](core-engine
 | 8 | `lofop.utils` | Model benchmarking: metric table, FLOPs, FPS, size, CSV/JSON export; dataset visualization lives in `lofop.data` | **Done** |
 | -- | CI / packaging | GitHub Actions CI (lint + tests + build) and PyPI/AUR packaging | **Done** |
 | -- | `lofop.sdk` | High-level Python SDK: the `Detector` class (build/train/predict/export) | **Done** (see docs/sdk.md) |
-| -- | `lofop.ops` | Cross-platform native C++ box ops (IoU, NMS) with Python fallback; MSVC/MinGW/g++/clang | **Done** |
+| -- | `lofop.ops` | Three-tier native box ops (IoU, NMS, Soft-NMS, dense decode): Python fallback, C++ fast path (MSVC/MinGW/g++/clang), optional CUDA tier (nvcc) | **Done** |
 
 Each phase lands with its own tests and docs before the next begins. Dependencies point downward
 only: `data`/`models`/`training` depend on `core`, never on each other's internals; interaction

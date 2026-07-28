@@ -95,6 +95,11 @@ def export_onnx(
     Raises:
         LofopError: If export fails or verification exceeds tolerance.
     """
+    if hasattr(model, "mask_head") or hasattr(model, "keypoint_head"):
+        raise LofopError(
+            "ONNX export currently covers detection models only; "
+            "segmentation/pose export lands in a later release"
+        )
     path = Path(target)
     path.parent.mkdir(parents=True, exist_ok=True)
     wrapper = DenseExportWrapper(model).cpu()

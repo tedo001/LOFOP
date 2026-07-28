@@ -11,8 +11,8 @@ HAVE_GNU = shutil.which("g++") or shutil.which("clang++")
 
 
 class TestBackendReporting:
-    def test_backend_is_one_of_two(self):
-        assert backend() in ("native", "python")
+    def test_backend_is_a_known_tier(self):
+        assert backend() in ("cuda", "native", "python")
 
     def test_python_path_always_available(self):
         # Regardless of backend, native=False must work everywhere.
@@ -30,6 +30,39 @@ class TestBackendReporting:
         boxes = [[0, 0, 10, 10], [1, 1, 11, 11], [50, 50, 60, 60]]
         scores = [0.9, 0.8, 0.7]
         assert nms(boxes, scores, native=True) == nms(boxes, scores, native=False)
+
+
+class TestCudaTier:
+    """CPU-host behavior of the optional CUDA tier: everything must degrade
+    gracefully when nvcc or a GPU is absent (the common case, including CI)."""
+
+    def test_build_without_nvcc_raises_cleanly(self, monkeypatch):
+        import shutil as sh
+
+        from lofop.core.exceptions import LofopError
+        from lofop.ops.native import build_native
+
+        if sh.which("nvcc"):
+            pytest.skip("nvcc present; this test covers the no-toolkit path")
+        with pytest.raises(LofopError, match="nvcc"):
+            build_native(cuda=True)
+
+    def test_load_without_library_returns_none(self):
+        from lofop.ops.native import _CUDA_LIB_STEM, find_library, load_native_cuda
+
+        if find_library(_CUDA_LIB_STEM) is not None:
+            pytest.skip("a CUDA library is actually built on this host")
+        assert load_native_cuda() is None
+
+    def test_ops_work_regardless_of_cuda(self):
+        # The dispatching ops must produce correct results whether or not the
+        # CUDA tier is active.
+        from lofop.ops import decode_dense, iou_matrix
+
+        row = iou_matrix([[0, 0, 10, 10]], [[0, 0, 10, 10]])[0]
+        assert row[0] == pytest.approx(1.0)
+        idx, labels, scores = decode_dense([[0.1, 0.9]], score_threshold=0.5)
+        assert idx == [0] and labels == [1]
 
 
 class TestCompilerSelection:

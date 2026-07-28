@@ -1,0 +1,9 @@
+# LOFOP-Detect s + instance segmentation (StencilHead prototypes).
+extends: [s.yaml]
+
+model:
+  type: model/LofopSegment
+  mask_head:
+    type: head/StencilHead
+    width: 96
+    num_prototypes: 16

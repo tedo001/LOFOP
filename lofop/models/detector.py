@@ -23,6 +23,19 @@ from lofop.ops.boxes import CLASS_OFFSET
 from lofop.registries import MODELS
 
 
+def flatten_levels(maps: list[Tensor], channels: int) -> Tensor:
+    """Concatenate per-level (B, C, H, W) maps into (B, N, C) location rows.
+
+    Same location ordering as :meth:`ApexHead.level_points`, so row ``i``
+    of any flattened map corresponds to point ``i``. Shared by the task
+    variants (segmentation coefficients, keypoint offsets).
+    """
+    batch = maps[0].shape[0]
+    return torch.cat(
+        [level.permute(0, 2, 3, 1).reshape(batch, -1, channels) for level in maps], dim=1
+    )
+
+
 @MODELS.register()
 class LofopDetect(nn.Module):
     """Anchor-free multi-scale detector.
@@ -62,9 +75,13 @@ class LofopDetect(nn.Module):
         self.max_detections = max_detections
         self._channels_last = False
 
+    def _features(self, images: Tensor) -> list[Tensor]:
+        """Fused pyramid features ``[P3, P4, P5]`` for a batch of images."""
+        return self.neck(self.backbone(images))
+
     def forward(self, images: Tensor) -> tuple[list[Tensor], list[Tensor], list[Tensor]]:
         """Raw per-level head outputs for a batch of images."""
-        return self.head(self.neck(self.backbone(images)))
+        return self.head(self._features(images))
 
     def _flatten(
         self, cls_out: list[Tensor], box_out: list[Tensor], quality_out: list[Tensor]
@@ -91,7 +108,24 @@ class LofopDetect(nn.Module):
             ``{"cls": ..., "box": ..., "quality": ..., "total": ...}`` scalar
             tensors (box/quality are zero when the batch has no objects).
         """
-        cls_out, box_out, quality_out = self.forward(images)
+        outputs = self.forward(images)
+        losses, _ = self._detection_losses(outputs, images, targets)
+        return losses
+
+    def _detection_losses(
+        self,
+        outputs: tuple[list[Tensor], list[Tensor], list[Tensor]],
+        images: Tensor,
+        targets: list[dict[str, Tensor]],
+    ) -> tuple[dict[str, Tensor], list[dict[str, Tensor]]]:
+        """Detection losses plus per-image assignment aux for task variants.
+
+        The aux list carries, per image, the flattened-location ``positive``
+        mask and ``assigned`` ground-truth indices so subclasses (segmentation,
+        pose) can supervise their extra branches on the same assignment
+        without re-running the assigner.
+        """
+        cls_out, box_out, quality_out = outputs
         points, strides = self.head.level_points(cls_out)
         cls, box, quality = self._flatten(cls_out, box_out, quality_out)
 
@@ -99,6 +133,7 @@ class LofopDetect(nn.Module):
         total_box = images.new_zeros(())
         total_quality = images.new_zeros(())
         total_pos = 0
+        aux: list[dict[str, Tensor]] = []
         for image_index, target in enumerate(targets):
             gt_boxes = target["boxes"]
             gt_labels = target["labels"]
@@ -108,6 +143,7 @@ class LofopDetect(nn.Module):
                 gt_boxes, gt_labels,
             )
             positive = assigned >= 0
+            aux.append({"positive": positive, "assigned": assigned})
             cls_targets = torch.zeros_like(cls[image_index])
             if positive.any():
                 cls_targets[positive, gt_labels[assigned[positive]]] = 1.0
@@ -146,7 +182,7 @@ class LofopDetect(nn.Module):
             "quality": total_quality / norm,
         }
         losses["total"] = losses["cls"] + losses["box"] + losses["quality"]
-        return losses
+        return losses, aux
 
     def optimize_for_inference(self) -> LofopDetect:
         """Switch to eval mode and channels_last memory format, in place.
@@ -171,7 +207,24 @@ class LofopDetect(nn.Module):
         """
         if self._channels_last:
             images = images.contiguous(memory_format=torch.channels_last)
-        cls_out, box_out, quality_out = self.forward(images)
+        results = self._decode_batch(self.forward(images), images)
+        for result in results:
+            result.pop("locations")
+        return results
+
+    def _decode_batch(
+        self,
+        outputs: tuple[list[Tensor], list[Tensor], list[Tensor]],
+        images: Tensor,
+    ) -> list[dict[str, Any]]:
+        """Threshold + class-aware NMS for a batch of raw head outputs.
+
+        Each result additionally carries ``locations`` -- the flattened
+        pyramid-location index of every kept detection -- which task variants
+        use to gather their per-location extras (mask coefficients, keypoint
+        offsets); :meth:`predict` strips it from the public output.
+        """
+        cls_out, box_out, quality_out = outputs
         points, _ = self.head.level_points(cls_out)
         cls, box, quality = self._flatten(cls_out, box_out, quality_out)
         scores_all = (cls.sigmoid() * quality.sigmoid().unsqueeze(-1)).sqrt()
@@ -183,6 +236,7 @@ class LofopDetect(nn.Module):
             if not keep_mask.any():
                 results.append(self._empty_result(images))
                 continue
+            location_index = keep_mask.nonzero(as_tuple=False).squeeze(1)
             boxes = self.head.decode_boxes(points[keep_mask], box[image_index][keep_mask])
             scores, labels = scores[keep_mask], labels[keep_mask]
             # Class-aware NMS via the coordinate-offset shift done in tensor
@@ -196,6 +250,7 @@ class LofopDetect(nn.Module):
             index = torch.as_tensor(keep, dtype=torch.long, device=images.device)
             results.append({
                 "boxes": boxes[index], "scores": scores[index], "labels": labels[index],
+                "locations": location_index[index],
             })
         return results
 
@@ -206,4 +261,5 @@ class LofopDetect(nn.Module):
             "boxes": torch.zeros((0, 4), device=device),
             "scores": torch.zeros((0,), device=device),
             "labels": torch.zeros((0,), dtype=torch.long, device=device),
+            "locations": torch.zeros((0,), dtype=torch.long, device=device),
         }

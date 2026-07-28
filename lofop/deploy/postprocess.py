@@ -11,8 +11,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
-from lofop.ops import batched_nms
+from lofop.ops import batched_nms, decode_dense, soft_nms
+from lofop.ops.boxes import CLASS_OFFSET
 
 
 @dataclass(frozen=True)
@@ -23,11 +25,18 @@ class Detections:
         boxes: (K, 4) xyxy boxes in input pixels.
         scores: K confidence scores, descending.
         labels: K class indices.
+        masks: Optional per-detection masks -- a (K, H, W) bool tensor when
+            produced by a segmentation model, else ``None``.
+        keypoints: Optional per-detection keypoints -- (K, num_keypoints, 3)
+            ``(x, y, visibility)`` rows when produced by a pose model, else
+            ``None``.
     """
 
     boxes: list[list[float]]
     scores: list[float]
     labels: list[int]
+    masks: Any = None
+    keypoints: Any = None
 
     def __len__(self) -> int:
         return len(self.scores)
@@ -40,6 +49,8 @@ def postprocess_dense(
     score_threshold: float = 0.25,
     nms_iou: float = 0.6,
     max_detections: int = 300,
+    soft: bool = False,
+    soft_sigma: float = 0.5,
 ) -> Detections:
     """Turn one image's dense model outputs into final detections.
 
@@ -50,19 +61,30 @@ def postprocess_dense(
         score_threshold: Minimum class score to consider a candidate.
         nms_iou: IoU threshold for class-aware NMS.
         max_detections: Cap on returned detections.
+        soft: Use class-aware Soft-NMS (gaussian decay) instead of greedy
+            NMS; better in crowded scenes. Returned scores are the decayed
+            ones.
+        soft_sigma: Gaussian decay width for Soft-NMS.
     """
-    candidate_boxes: list[list[float]] = []
-    candidate_scores: list[float] = []
-    candidate_labels: list[int] = []
-    for box, class_scores in zip(boxes, scores):
-        best_label, best_score = -1, score_threshold
-        for label, score in enumerate(class_scores):
-            if score > best_score:
-                best_label, best_score = label, float(score)
-        if best_label >= 0:
-            candidate_boxes.append([float(v) for v in box])
-            candidate_scores.append(best_score)
-            candidate_labels.append(best_label)
+    indices, candidate_labels, _ = decode_dense(scores, score_threshold=score_threshold)
+    candidate_boxes = [[float(v) for v in boxes[i]] for i in indices]
+    # Re-read the winning scores from the input rows: the native kernel works
+    # in float32, and callers expect their exact values back.
+    candidate_scores = [float(scores[i][lab]) for i, lab in zip(indices, candidate_labels)]
+    if soft:
+        shifted = [
+            [v + CLASS_OFFSET * label for v in box]
+            for box, label in zip(candidate_boxes, candidate_labels)
+        ]
+        keep, kept_scores = soft_nms(
+            shifted, candidate_scores, sigma=soft_sigma,
+            score_threshold=score_threshold, max_keep=max_detections,
+        )
+        return Detections(
+            boxes=[candidate_boxes[i] for i in keep],
+            scores=kept_scores,
+            labels=[candidate_labels[i] for i in keep],
+        )
     keep = batched_nms(
         candidate_boxes, candidate_scores, candidate_labels,
         iou_threshold=nms_iou, max_keep=max_detections,
