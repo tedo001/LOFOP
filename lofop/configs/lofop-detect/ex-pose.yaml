@@ -1,0 +1,10 @@
+# LOFOP-Detect ex + keypoint estimation (VertexHead offsets).
+extends: [ex.yaml]
+num_keypoints: 17
+
+model:
+  type: model/LofopPose
+  keypoint_head:
+    type: head/VertexHead
+    width: 192
+    num_keypoints: ${num_keypoints}

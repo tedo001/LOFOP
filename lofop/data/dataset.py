@@ -41,18 +41,26 @@ class Category:
 
 @dataclass
 class BoxAnnotation:
-    """One axis-aligned bounding box.
+    """One axis-aligned bounding box, optionally with a mask and keypoints.
 
     Attributes:
         bbox: ``(x1, y1, x2, y2)`` in absolute pixels.
         category_id: Id of the category this box belongs to.
         attributes: Format-specific extras (e.g. COCO ``iscrowd``) preserved
             through conversions when the target format understands them.
+        segmentation: Optional instance mask as polygons -- each polygon a
+            flat ``[x1, y1, x2, y2, ...]`` list in absolute pixels (COCO
+            polygon convention). ``None`` for box-only annotations.
+        keypoints: Optional ``[(x, y, visibility), ...]`` in absolute pixels;
+            visibility follows COCO (0 = not labeled, 1 = labeled but not
+            visible, 2 = visible). ``None`` for annotations without keypoints.
     """
 
     bbox: tuple[float, float, float, float]
     category_id: int
     attributes: dict[str, Any] = field(default_factory=dict)
+    segmentation: list[list[float]] | None = None
+    keypoints: list[tuple[float, float, int]] | None = None
 
     @property
     def width(self) -> float:

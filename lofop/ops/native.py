@@ -35,12 +35,16 @@ from lofop.core.exceptions import LofopError
 from lofop.core.logging import get_logger
 
 _LIB_STEM = "_lofop_ops"
+_CUDA_LIB_STEM = "_lofop_ops_cuda"
 _SOURCE = Path(__file__).resolve().parent.parent / "csrc" / "box_ops.cpp"
+_CUDA_SOURCE = Path(__file__).resolve().parent.parent / "csrc" / "box_ops.cu"
 _IS_WINDOWS = sys.platform.startswith("win")
 
 logger = get_logger(__name__)
 _loaded: ctypes.CDLL | None = None
 _load_attempted = False
+_cuda_loaded: ctypes.CDLL | None = None
+_cuda_load_attempted = False
 
 
 def _lib_suffix() -> str:
@@ -48,12 +52,12 @@ def _lib_suffix() -> str:
     return ".dll" if _IS_WINDOWS else ".so"
 
 
-def _candidate_paths() -> list[Path]:
+def _candidate_paths(stem: str = _LIB_STEM) -> list[Path]:
     cache_dir = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "lofop"
     suffix = _lib_suffix()
     return [
-        Path(__file__).resolve().parent / f"{_LIB_STEM}{suffix}",
-        cache_dir / f"{_LIB_STEM}{suffix}",
+        Path(__file__).resolve().parent / f"{stem}{suffix}",
+        cache_dir / f"{stem}{suffix}",
     ]
 
 
@@ -100,18 +104,25 @@ def _build_command(compiler: str, source: Path, target: Path) -> tuple[list[str]
     return cmd, None
 
 
-def build_native(*, force: bool = False, compiler: str | None = None) -> Path:
-    """Compile the C++ ops library and return its path.
+def build_native(*, force: bool = False, compiler: str | None = None,
+                 cuda: bool = False) -> Path:
+    """Compile the native ops library and return its path.
 
     Args:
         force: Rebuild even if a library already exists.
         compiler: Compiler binary to use. Defaults to ``$CXX`` or the first
             available of the platform's preferred compilers.
+        cuda: Build the optional CUDA tier from ``box_ops.cu`` instead of the
+            C++ tier (requires ``nvcc`` on PATH). The CUDA library is used
+            automatically on hosts with a usable NVIDIA GPU and ignored
+            everywhere else.
 
     Raises:
         LofopError: If no compiler is available or every attempt fails. The
             pure Python ops keep working regardless -- building is optional.
     """
+    if cuda:
+        return _build_cuda(force=force, compiler=compiler)
     existing = find_library()
     if existing is not None and not force:
         return existing
@@ -146,9 +157,40 @@ def build_native(*, force: bool = False, compiler: str | None = None) -> Path:
     )
 
 
-def find_library() -> Path | None:
+def _build_cuda(*, force: bool, compiler: str | None) -> Path:
+    existing = find_library(_CUDA_LIB_STEM)
+    if existing is not None and not force:
+        return existing
+    nvcc = compiler or os.environ.get("LOFOP_NVCC") or "nvcc"
+    if shutil.which(nvcc) is None:
+        raise LofopError(
+            "nvcc not found; the CUDA ops tier needs the NVIDIA CUDA toolkit. "
+            "The C++ and Python ops keep working regardless -- CUDA is optional.",
+            context={"tried": nvcc},
+        )
+    errors: list[str] = []
+    for target in _candidate_paths(_CUDA_LIB_STEM):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [nvcc, "-O3", "-std=c++17", "--shared", str(_CUDA_SOURCE), "-o", str(target)]
+        if not _IS_WINDOWS:
+            cmd[4:4] = ["-Xcompiler", "-fPIC"]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+        except (subprocess.CalledProcessError, OSError) as exc:
+            errors.append(f"{nvcc}: {getattr(exc, 'stderr', exc)}")
+            continue
+        logger.info("Built CUDA ops library at %s (via %s)", target, nvcc)
+        _reset_cache()
+        return target
+    raise LofopError(
+        "Could not build the CUDA ops library; the C++ and Python ops remain available.",
+        context={"errors": errors},
+    )
+
+
+def find_library(stem: str = _LIB_STEM) -> Path | None:
     """Return the path of a previously built library, if any."""
-    for path in _candidate_paths():
+    for path in _candidate_paths(stem):
         if path.is_file():
             return path
     return None
@@ -185,17 +227,80 @@ def load_native() -> ctypes.CDLL | None:
         ctypes.POINTER(ctypes.c_int32),
     ]
     lib.lofop_nms.restype = ctypes.c_int32
+    # Kernels added after 1.1.x; hasattr guards keep an older compiled library
+    # loadable (its ops still accelerate; the new ops use the Python path).
+    if hasattr(lib, "lofop_soft_nms"):
+        lib.lofop_soft_nms.argtypes = [
+            ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float),
+            ctypes.c_int32, ctypes.c_float, ctypes.c_float, ctypes.c_float,
+            ctypes.c_int32, ctypes.c_int32,
+            ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_float),
+        ]
+        lib.lofop_soft_nms.restype = ctypes.c_int32
+    if hasattr(lib, "lofop_decode_dense"):
+        lib.lofop_decode_dense.argtypes = [
+            ctypes.POINTER(ctypes.c_float), ctypes.c_int32, ctypes.c_int32, ctypes.c_float,
+            ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32),
+            ctypes.POINTER(ctypes.c_float),
+        ]
+        lib.lofop_decode_dense.restype = ctypes.c_int32
     _loaded = lib
     logger.debug("Loaded native ops library from %s", path)
     return lib
 
 
+def load_native_cuda() -> ctypes.CDLL | None:
+    """Load the CUDA ops library, or ``None`` when unavailable or no GPU.
+
+    Only returns a library when a CUDA device is actually usable at load
+    time, so callers can treat "loaded" as "safe to dispatch to".
+    """
+    global _cuda_loaded, _cuda_load_attempted
+    if _cuda_load_attempted:
+        return _cuda_loaded
+    _cuda_load_attempted = True
+    path = find_library(_CUDA_LIB_STEM)
+    if path is None:
+        return None
+    try:
+        lib = ctypes.CDLL(str(path))
+    except OSError as exc:
+        logger.warning("Failed to load CUDA ops library %s: %s", path, exc)
+        return None
+    lib.lofop_cuda_available.argtypes = []
+    lib.lofop_cuda_available.restype = ctypes.c_int32
+    if lib.lofop_cuda_available() != 1:
+        logger.debug("CUDA ops library built but no usable CUDA device; ignoring")
+        return None
+    lib.lofop_cuda_iou_matrix.argtypes = [
+        ctypes.POINTER(ctypes.c_float), ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_float), ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_float),
+    ]
+    lib.lofop_cuda_iou_matrix.restype = ctypes.c_int32
+    lib.lofop_cuda_decode_dense.argtypes = [
+        ctypes.POINTER(ctypes.c_float), ctypes.c_int32, ctypes.c_int32, ctypes.c_float,
+        ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32),
+        ctypes.POINTER(ctypes.c_float),
+    ]
+    lib.lofop_cuda_decode_dense.restype = ctypes.c_int32
+    _cuda_loaded = lib
+    logger.debug("Loaded CUDA ops library from %s", path)
+    return lib
+
+
 def backend() -> str:
-    """Return the active ops backend: ``"native"`` (C++) or ``"python"``."""
+    """Return the fastest active ops tier: ``"cuda"``, ``"native"`` (C++),
+    or ``"python"``. Tiers stack -- ``"cuda"`` implies the lower tiers remain
+    available and are used for the ops CUDA does not cover."""
+    if load_native_cuda() is not None:
+        return "cuda"
     return "native" if load_native() is not None else "python"
 
 
 def _reset_cache() -> None:
-    global _loaded, _load_attempted
+    global _loaded, _load_attempted, _cuda_loaded, _cuda_load_attempted
     _loaded = None
     _load_attempted = False
+    _cuda_loaded = None
+    _cuda_load_attempted = False

@@ -38,7 +38,11 @@ from lofop.registries import HUB
 from lofop.training.torch_data import image_to_tensor
 
 _CONFIG_DIR = Path(__file__).resolve().parent / "configs" / "lofop-detect"
-_VARIANTS = ("n", "s", "ex")
+_VARIANTS = (
+    "n", "s", "ex",
+    "n-seg", "s-seg", "ex-seg",
+    "n-pose", "s-pose", "ex-pose",
+)
 
 ImageSource = Union[str, Path, "Image.Image", torch.Tensor]
 
@@ -83,7 +87,9 @@ class Detector:
     Args:
         model: What to build. One of:
 
-            * a variant name -- ``"lofop-detect-n" | "s" | "ex"``
+            * a variant name -- detection ``"lofop-detect-n" | "s" | "ex"``,
+              segmentation ``"lofop-detect-n-seg" | "s-seg" | "ex-seg"``, or
+              pose ``"lofop-detect-n-pose" | "s-pose" | "ex-pose"``
               (with or without the ``lofop-detect-`` prefix);
             * a path to a model config YAML;
             * a :class:`~lofop.core.config.Config`/dict with a ``model`` spec;
@@ -98,6 +104,9 @@ class Detector:
         image_size: Inference resolution; images are resized to this square
             and boxes are mapped back to original coordinates.
         device: ``"cpu"`` / ``"cuda"``; auto-selects CUDA when available.
+        num_keypoints: Keypoints per instance for pose variants (default 17,
+            the COCO person skeleton). Ignored by detection/segmentation
+            models.
 
     Attributes:
         model: The underlying :class:`LofopDetect` torch module -- fully
@@ -113,6 +122,7 @@ class Detector:
         class_names: Sequence[str] | None = None,
         image_size: int = 640,
         device: str | None = None,
+        num_keypoints: int | None = None,
     ) -> None:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.image_size = image_size
@@ -121,6 +131,8 @@ class Detector:
         else:
             cfg = _resolve_model_spec(model)
             cfg.num_classes = num_classes
+            if num_keypoints is not None and "num_keypoints" in cfg:
+                cfg.num_keypoints = num_keypoints
             cfg.resolve()
             self.model = HUB.build(cfg.model)
         if class_names is not None and len(class_names) != self.model.head.num_classes:
@@ -181,10 +193,27 @@ class Detector:
                 min(max(x2 * scale_x, 0.0), width),
                 min(max(y2 * scale_y, 0.0), height),
             ])
+        masks = None
+        if "masks" in raw:  # segmentation variant: resize to original pixels
+            masks = raw["masks"].cpu()
+            if masks.shape[0] and (height, width) != masks.shape[-2:]:
+                masks = torch.nn.functional.interpolate(
+                    masks.unsqueeze(1).float(), size=(height, width), mode="nearest"
+                ).squeeze(1) > 0.5
+            elif not masks.shape[0]:
+                masks = torch.zeros((0, height, width), dtype=torch.bool)
+        keypoints = None
+        if "keypoints" in raw:  # pose variant: map to original pixels
+            keypoints = raw["keypoints"].cpu().clone()
+            keypoints[..., 0] *= scale_x
+            keypoints[..., 1] *= scale_y
+            keypoints = keypoints.tolist()
         return Detections(
             boxes=boxes,
             scores=raw["scores"].cpu().tolist(),
             labels=raw["labels"].cpu().tolist(),
+            masks=masks,
+            keypoints=keypoints,
         )
 
     def _load_image(self, source: ImageSource) -> tuple[torch.Tensor, tuple[int, int]]:
@@ -243,6 +272,7 @@ class Detector:
             when no validation data was provided.
         """
         from lofop.data import load_dataset
+        from lofop.models import LofopPose, LofopSegment
         from lofop.training import DetectionTorchDataset, Trainer
 
         if train_data is None:
@@ -254,9 +284,15 @@ class Detector:
             train_data = load_dataset(data_format, train_source, **kwargs)
             if val_source:
                 val_data = load_dataset(data_format, val_source, **kwargs)
+        # Task variants pull their extra supervision from the same canonical
+        # dataset: seg rasterizes polygons, pose scales keypoints.
+        extras = {
+            "include_masks": isinstance(self.model, LofopSegment),
+            "include_keypoints": isinstance(self.model, LofopPose),
+        }
         train_ds = DetectionTorchDataset(
             train_data, image_size=self.image_size, augment=True,
-            strong_augment=strong_augment,
+            strong_augment=strong_augment, **extras,
         )
         val_ds = (
             DetectionTorchDataset(val_data, image_size=self.image_size)

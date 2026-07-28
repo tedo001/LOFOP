@@ -83,9 +83,21 @@ class CocoAdapter(DatasetAdapter):
                     "Annotation references unknown category",
                     context={"source": str(path), "category_id": category_id, "image_id": image_id},
                 )
+            segmentation = None
+            raw_seg = ann.get("segmentation")
+            if isinstance(raw_seg, list) and raw_seg and isinstance(raw_seg[0], list):
+                segmentation = [[float(v) for v in poly] for poly in raw_seg]
+            keypoints = None
+            raw_kp = ann.get("keypoints")
+            if isinstance(raw_kp, list) and raw_kp and len(raw_kp) % 3 == 0:
+                keypoints = [
+                    (float(raw_kp[i]), float(raw_kp[i + 1]), int(raw_kp[i + 2]))
+                    for i in range(0, len(raw_kp), 3)
+                ]
             sample.annotations.append(
                 BoxAnnotation(bbox=(x, y, x + w, y + h), category_id=category_id,
-                              attributes=attributes)
+                              attributes=attributes, segmentation=segmentation,
+                              keypoints=keypoints)
             )
         if skipped:
             logger.warning("Skipped %d annotations referencing unknown images", skipped)
@@ -102,16 +114,20 @@ class CocoAdapter(DatasetAdapter):
         for sample in dataset.samples:
             for box in sample.annotations:
                 x1, y1, x2, y2 = box.bbox
-                annotations.append(
-                    {
-                        "id": ann_id,
-                        "image_id": sample.id,
-                        "category_id": box.category_id,
-                        "bbox": [x1, y1, x2 - x1, y2 - y1],
-                        "area": box.area,
-                        "iscrowd": int(box.attributes.get("iscrowd", 0)),
-                    }
-                )
+                record = {
+                    "id": ann_id,
+                    "image_id": sample.id,
+                    "category_id": box.category_id,
+                    "bbox": [x1, y1, x2 - x1, y2 - y1],
+                    "area": box.area,
+                    "iscrowd": int(box.attributes.get("iscrowd", 0)),
+                }
+                if box.segmentation is not None:
+                    record["segmentation"] = box.segmentation
+                if box.keypoints is not None:
+                    record["keypoints"] = [v for kp in box.keypoints for v in kp]
+                    record["num_keypoints"] = sum(1 for kp in box.keypoints if kp[2] > 0)
+                annotations.append(record)
                 ann_id += 1
         payload = {
             "info": {"description": dataset.name},

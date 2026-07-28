@@ -215,6 +215,8 @@ def _cmd_train(args: argparse.Namespace) -> int:
         load_dataset(data.format, data.train_source, **load_kwargs),
         image_size=image_size, augment=True,
         strong_augment=data.get("strong_augment", False),
+        include_masks=hasattr(model, "mask_head"),
+        include_keypoints=hasattr(model, "keypoint_head"),
     )
     val_ds = None
     if "val_source" in data:
