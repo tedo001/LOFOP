@@ -14,7 +14,7 @@ modern computer-vision engineering practices while remaining self-contained.
 > C++ / optional CUDA), the LOFOP-Detect family (detection + segmentation + pose
 > variants), training engine (schedulers, early stopping, strong augmentation), full
 > CLI, Python SDK, and verified ONNX (fixed + dynamic shapes) / TensorRT export.
-> 308 tests passing with a coverage-gated CI. See
+> 316 tests passing with a coverage-gated CI. See
 > [`docs/architecture.md`](docs/architecture.md) for the subsystem map and
 > [`CHANGELOG.md`](CHANGELOG.md) for release history.
 
@@ -169,7 +169,7 @@ docker/          # CPU, CUDA, and ONNX Runtime images
 docs/            # architecture, per-module references, LOFOP-Detect design doc
 benchmarks/      # reusable performance measurement scripts
 examples/        # end-to-end runnable demos
-tests/           # pytest suite mirroring the package layout (308 tests)
+tests/           # pytest suite mirroring the package layout (316 tests)
 ```
 
 ## Development

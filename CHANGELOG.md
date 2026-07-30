@@ -27,6 +27,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Ops: optional CUDA tier (`build_native(cuda=True)`, needs nvcc) for
   pairwise IoU and dense decode on NVIDIA GPUs; `backend()` now reports
   `cuda`/`native`/`python`, always falling back cleanly.
+- Inference: selectable duplicate-removal via `nms_mode` on every model and
+  `Detector` -- `"greedy"` (default, unchanged), `"soft"` (Soft-NMS score
+  decay), or `"free"` (NMS-free 3x3 peak selection: pure tensor math, no
+  suppression loop).
 
 ### Changed
 - ONNX export raises a clear error for segmentation/pose models (their
