@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [1.2.0] - 2026-07-28
+## [1.2.1] - 2026-07-31
 
 ### Added
 - Instance segmentation: `lofop-detect-{n,s,ex}-seg` variants
@@ -87,8 +87,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Python SDK (`Detector`) and the `lofop` CLI.
 - Packaging for PyPI (wheel/sdist) and AUR; CI and release workflows.
 
-[Unreleased]: https://github.com/tedo001/LOFOP/compare/v1.2.0...HEAD
-[1.2.0]: https://github.com/tedo001/LOFOP/compare/v1.1.3...v1.2.0
+[Unreleased]: https://github.com/tedo001/LOFOP/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/tedo001/LOFOP/compare/v1.1.3...v1.2.1
 [1.1.3]: https://github.com/tedo001/LOFOP/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/tedo001/LOFOP/compare/v0.1.0...v1.1.2
 [0.1.0]: https://github.com/tedo001/LOFOP/releases/tag/v0.1.0

@@ -4,7 +4,7 @@ A complete, practical guide to installing, running, training, exporting, and dep
 its flagship detector **LOFOP-Detect**. This is the hands-on manual; for architecture and design
 rationale see [`docs/architecture.md`](docs/architecture.md) and the per-module docs it links.
 
-- **Version:** 1.2.0
+- **Version:** 1.2.1
 - **Python:** 3.9+
 - **Platforms:** Linux, macOS, Windows
 
@@ -85,7 +85,7 @@ Maintainers: release steps (PyPI + AUR) are in [`docs/packaging.md`](packaging.m
 ## 3. Verify your install
 
 ```bash
-lofop version                  # prints 1.2.0
+lofop version                  # prints 1.2.1
 python -m pytest               # runs the test suite (316 passed, 3 skipped without GPU/TensorBoard)
 ```
 
