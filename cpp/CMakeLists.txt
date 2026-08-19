@@ -102,6 +102,8 @@ if(LOFOP_BUILD_EXAMPLES)
 endif()
 
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
 install(TARGETS lofop EXPORT lofopTargets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -109,3 +111,23 @@ install(TARGETS lofop EXPORT lofopTargets
 )
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(EXPORT lofopTargets NAMESPACE lofop:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/lofop)
+
+# The exported target set alone is not enough: find_package(lofop) looks for a
+# lofopConfig.cmake, so generate one (plus a version file) and install it
+# beside the targets. Without this a downstream `find_package(lofop REQUIRED)`
+# fails even though the library and headers installed correctly.
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/lofopConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/lofopConfig.cmake"
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/lofop
+)
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/lofopConfigVersion.cmake"
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion
+)
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/lofopConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/lofopConfigVersion.cmake"
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/lofop
+)

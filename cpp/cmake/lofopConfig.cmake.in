@@ -1,0 +1,13 @@
+@PACKAGE_INIT@
+
+# Package config for `find_package(lofop)`. Pulls in the exported target set,
+# which carries the include directories, the compile definitions (including
+# LOFOP_WITH_ONNXRUNTIME when the SDK was built with it), and the link
+# dependencies, so a consumer needs nothing beyond:
+#
+#     find_package(lofop REQUIRED)
+#     target_link_libraries(my_app PRIVATE lofop::lofop)
+
+include("${CMAKE_CURRENT_LIST_DIR}/lofopTargets.cmake")
+
+check_required_components(lofop)
