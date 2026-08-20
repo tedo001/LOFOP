@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-19
+
 ### Added
 - C++ inference SDK (`cpp/`): `lofop::Detector`, `lofop::Image`,
   `lofop::Detection`, and a pluggable `lofop::Engine` (ONNX Runtime backend
@@ -21,11 +23,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   runtimes, with a pure Python reference for compiler-free installs. Parity
   between kernel and reference is asserted to float32 epsilon in CI.
 - CI: the C++ SDK is built and tested on Linux, Windows, and macOS.
+- Packaging: the release workflow builds the C++ SDK on Linux, macOS, and
+  Windows and attaches the archives to the GitHub Release, so consumers can
+  use a prebuilt package instead of compiling.
+- Packaging: a vcpkg port (`packaging/vcpkg/`) and a Conan 2.x recipe
+  (`packaging/conan/`), both exposing the ONNX Runtime backend as an opt-in
+  feature. Publishing options are documented in `docs/packaging.md`.
+- The C++ package installs a CMake package config, so
+  `find_package(lofop)` works for downstream projects.
 
 ### Changed
 - The native ops library now compiles from multiple translation units
   (`box_ops.cpp` + `preprocess.cpp`); previously built libraries still load,
   as new symbols are bound behind `hasattr` guards.
+- `scripts/check_version_sync.py` now checks four sources rather than two,
+  adding the CMake project version and `lofop::kVersion`. A drift in either
+  breaks C++ dependency resolution, so it is a release blocker.
 
 ## [1.2.1] - 2026-07-31
 

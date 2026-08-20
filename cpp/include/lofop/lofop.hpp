@@ -33,7 +33,7 @@
 namespace lofop {
 
 // Version of the SDK, kept in step with the Python package.
-constexpr const char* kVersion = "1.2.1";
+constexpr const char* kVersion = "1.3.0";
 
 // Thrown for every failure this SDK reports: missing files, unreadable
 // images, malformed models, inference errors.

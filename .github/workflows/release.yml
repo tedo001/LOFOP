@@ -1,9 +1,18 @@
 
 name: release
 
-# Publishes the package to PyPI when a version tag (v*) is pushed, so
-# `pip install lofop` serves the new release. Uses PyPI Trusted Publishing
-# (OIDC): no API token is stored in the repository.
+# Publishes a version tag (v*) two ways:
+#
+#   Python -- builds the sdist/wheel and publishes to PyPI via Trusted
+#             Publishing (OIDC), so `pip install lofop` serves it. No API
+#             token is stored in the repository.
+#   C++    -- builds the SDK on Linux, macOS, and Windows and attaches the
+#             archives to the GitHub Release.
+#
+# C++ has no PyPI: vcpkg and Conan registries do not host code, they host a
+# recipe that downloads a tarball from here and verifies its hash. The GitHub
+# Release *is* the distribution point, which is why the C++ artifacts are
+# attached to it rather than pushed anywhere.
 #
 # One-time setup on PyPI: create the project (or a pending publisher) and add
 # this repository as a trusted publisher for the `pypi` environment.
@@ -47,3 +56,59 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Build the C++ SDK for each platform and upload the archive. Consumers who
+  # do not want to compile from source download these; vcpkg and Conan users
+  # build from the tag, which GitHub serves automatically.
+  cpp:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+          - os: macos-latest
+            name: macos-arm64
+          - os: windows-latest
+            name: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S cpp -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=stage
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure
+      - name: Install into the staging tree
+        run: cmake --install build --config Release --prefix stage
+      - name: Archive (Unix)
+        if: runner.os != 'Windows'
+        run: tar -czf lofop-${{ github.ref_name }}-${{ matrix.name }}.tar.gz -C stage .
+      - name: Archive (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path stage/* -DestinationPath lofop-${{ github.ref_name }}-${{ matrix.name }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cpp-${{ matrix.name }}
+          path: |
+            lofop-*.tar.gz
+            lofop-*.zip
+
+  # Attach every C++ archive to the GitHub Release for this tag.
+  attach:
+    needs: cpp
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # required to upload release assets
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cpp-*
+          merge-multiple: true
+          path: artifacts/
+      - name: Upload to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          fail_on_unmatched_files: true
