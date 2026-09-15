@@ -38,19 +38,20 @@ something has not been measured, this book says so rather than guessing.
 
 **Part IV &mdash; Production**
 14. [Export and deployment](#14-export-and-deployment)
-15. [Experiment tracking](#15-experiment-tracking)
-16. [The ops layer](#16-the-ops-layer)
+15. [The torch-free runtime](#15-the-torch-free-runtime)
+16. [Experiment tracking](#16-experiment-tracking)
+17. [The ops layer](#17-the-ops-layer)
 
 **Part V &mdash; Extending LOFOP**
-17. [Configs and registries](#17-configs-and-registries)
-18. [Writing your own components](#18-writing-your-own-components)
-19. [Events and hooks](#19-events-and-hooks)
+18. [Configs and registries](#18-configs-and-registries)
+19. [Writing your own components](#19-writing-your-own-components)
+20. [Events and hooks](#20-events-and-hooks)
 
 **Part VI &mdash; Reference**
-20. [The CLI](#20-the-cli)
-21. [Cookbook](#21-cookbook)
-22. [Troubleshooting](#22-troubleshooting)
-23. [API reference](#23-api-reference)
+21. [The CLI](#21-the-cli)
+22. [Cookbook](#22-cookbook)
+23. [Troubleshooting](#23-troubleshooting)
+24. [API reference](#24-api-reference)
 
 ---
 
@@ -859,7 +860,102 @@ det.optimize()      # eval mode + channels_last
 Measured 1.6&times; forward speedup at 640px on CPU, neutral at 128px, outputs identical
 to float tolerance.
 
-## 15. Experiment tracking
+## 15. The torch-free runtime
+
+Chapter 14 exported a graph. This chapter runs it in production, with **no
+PyTorch installed at all**.
+
+`lofop.runtime` is a separate, minimal inference path: it loads an exported
+ONNX model, preprocesses images through LOFOP's native C++ kernels, and
+post-processes with the same ops the training path uses. The dependency
+footprint is the LOFOP core plus an ONNX runtime.
+
+```python
+from lofop.runtime import Detector
+
+det = Detector(
+    "model.onnx",
+    score_threshold=0.25,
+    nms_iou=0.6,
+    max_detections=300,
+    class_names=["cat", "dog"],
+    soft_nms=False,
+)
+
+for hit in det.predict("photo.jpg"):
+    print(hit.box, hit.score, hit.label, hit.name)
+```
+
+Note the different result shape from `lofop.Detector`: the runtime returns a
+**list of individual `Detection` records**, each with `box`, `score`, `label`
+and `name`, rather than one batched `Detections` per image. The runtime is
+built for serving one image at a time, where per-detection records are what
+callers want.
+
+```python
+@dataclass
+class Detection:
+    box: list[float]     # xyxy in original image pixels
+    score: float
+    label: int
+    name: str | None     # resolved from class_names when given
+```
+
+### Choosing an execution provider
+
+```python
+det = Detector("model.onnx", providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+```
+
+### Letterboxing
+
+The runtime preprocesses with **letterbox** resizing, which preserves aspect
+ratio by padding rather than stretching, and maps boxes back afterwards:
+
+```python
+from lofop.ops.preprocess import letterbox, unletterbox_boxes
+
+tensor, meta = letterbox(pixels, width, height, size=640, pad_value=0.447)
+boxes = unletterbox_boxes(boxes, meta)
+```
+
+`letterbox` runs on the native C++ kernel when it is built and falls back to
+Python otherwise, like every other LOFOP op.
+
+This is worth knowing even if you never call it directly: the training path
+in Part II still resizes to a square and distorts aspect ratio, so a model
+trained through `Detector.train` and served through `lofop.runtime` sees
+slightly different geometry. Until letterboxing reaches the training path,
+prefer matching the two if you are measuring accuracy carefully.
+
+### Images without Pillow
+
+```python
+from lofop.runtime import Image
+
+image = Image(width=640, height=480, channels=3, pixels=raw_bytes)
+detections = det.predict(image)
+```
+
+### The C++ SDK
+
+The same runtime exists as a C++ library for hosts with no Python at all. It
+links the same `lofop/csrc` kernels, so preprocessing and post-processing are
+bit-identical to the Python path. See [`docs/cpp-sdk.md`](docs/cpp-sdk.md).
+
+### Which path should you use
+
+| | `lofop.Detector` | `lofop.runtime.Detector` |
+|---|---|---|
+| Needs PyTorch | yes | **no** |
+| Trains | yes | no |
+| Input | checkpoints and configs | exported ONNX |
+| Batching | yes | one image at a time |
+| Returns | `list[Detections]` | `list[Detection]` |
+| Preprocessing | square resize | letterbox |
+| Use for | development, training, evaluation | serving, edge devices |
+
+## 16. Experiment tracking
 
 ```python
 from lofop.mlops import track
@@ -891,7 +987,7 @@ lofop runs show <run_id> --root runs/registry
 lofop runs compare <id_a> <id_b> --root runs/registry
 ```
 
-## 16. The ops layer
+## 17. The ops layer
 
 LOFOP's performance-critical primitives have three tiers, selected fastest-first:
 
@@ -948,7 +1044,7 @@ across randomised matrices. Rows and columns may differ in count; unassigned row
 
 # Part V &mdash; Extending LOFOP
 
-## 17. Configs and registries
+## 18. Configs and registries
 
 LOFOP is config-driven. Anything executable is a registered component; YAML holds only
 data.
@@ -992,7 +1088,7 @@ cfg.freeze()        # make a config read-only
 cfg.to_dict()
 ```
 
-## 18. Writing your own components
+## 19. Writing your own components
 
 Register a component and it is immediately usable from YAML. No framework changes.
 
@@ -1042,7 +1138,7 @@ This is exactly how the 1.2.2 task variants were added: `SlateHead`, `StencilHea
 `VertexHead` and `SwiftNet` are registrations plus YAML, with no changes to the core
 engine.
 
-## 19. Events and hooks
+## 20. Events and hooks
 
 The `Trainer` emits events; subscribers attach without touching it.
 
@@ -1075,7 +1171,7 @@ subclassing, no monkey-patching.
 
 # Part VI &mdash; Reference
 
-## 20. The CLI
+## 21. The CLI
 
 Everything in this book has a command-line equivalent.
 
@@ -1106,7 +1202,7 @@ lofop runs list --root runs/registry
 
 The dataset commands need no PyTorch, so they run on an edge box or in CI.
 
-## 21. Cookbook
+## 22. Cookbook
 
 **Detect on a folder of images**
 
@@ -1179,7 +1275,7 @@ RUN pip install lofop && \
     python -c "from lofop.ops import build_native; build_native()"
 ```
 
-## 22. Troubleshooting
+## 23. Troubleshooting
 
 **`LofopError: ... pip install "lofop[tracking]"`**
 Working as designed. Install the named extra.
@@ -1212,7 +1308,7 @@ Use more data, fewer classes, more epochs, and `strong_augment=True`.
 **`backend()` says `python`.** The native library is not built. Run
 `build_native()`. Results stay correct either way &mdash; only speed changes.
 
-## 23. API reference
+## 24. API reference
 
 ### lofop
 
@@ -1274,6 +1370,12 @@ Detector(model="lofop-detect-s", *, num_classes=80, checkpoint=None, class_names
 `Detections`, `postprocess_dense`, `export_onnx`, `export_tensorrt`,
 `DenseExportWrapper`, `build_engine_from_onnx`
 
+### lofop.runtime
+
+`Detector`, `Detection`, `Image` &mdash; the torch-free ONNX serving path.
+Preprocessing helpers live in `lofop.ops.preprocess`: `letterbox`,
+`unletterbox_boxes`, `LetterboxMeta`.
+
 ### lofop.mlops
 
 `track`, `RunTracker`, `RunRecord`, `list_runs`, `load_run`, `compare_runs`
@@ -1300,7 +1402,8 @@ Stated plainly, so you can plan around it:
 
 - **No published pretrained checkpoints.** Every model trains from scratch today. This is
   LOFOP's largest gap and its top roadmap item.
-- **No letterboxing.** Images are resized to a square, distorting aspect ratio.
+- **Letterboxing is serving-only.** `lofop.runtime` letterboxes, but the
+  training path still resizes to a square, so the two see different geometry.
 - **Box-only evaluation.** No mask mAP, no keypoint OKS.
 - **Export gaps.** ONNX and TensorRT cover dense detection only.
 - **Pose flip augmentation disabled**, pending left/right keypoint pair mapping.
