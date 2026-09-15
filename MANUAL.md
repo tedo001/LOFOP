@@ -4,7 +4,7 @@ A complete, practical guide to installing, running, training, exporting, and dep
 its flagship detector **LOFOP-Detect**. This is the hands-on manual; for architecture and design
 rationale see [`docs/architecture.md`](docs/architecture.md) and the per-module docs it links.
 
-- **Version:** 1.3.0
+- **Version:** 1.2.2
 - **Python:** 3.9+
 - **Platforms:** Linux, macOS, Windows
 
@@ -85,7 +85,7 @@ Maintainers: release steps (PyPI + AUR) are in [`docs/packaging.md`](packaging.m
 ## 3. Verify your install
 
 ```bash
-lofop version                  # prints 1.3.0
+lofop version                  # prints 1.2.2
 python -m pytest               # runs the test suite (446 passed, 3 skipped without GPU/TensorBoard)
 ```
 
@@ -637,6 +637,10 @@ is on PATH) or run from a *Developer PowerShell for Visual Studio* (so `cl.exe` 
 call `build_native()`. Without a compiler you simply stay on the Python path — nothing breaks.
 
 ## 11. Python SDK
+
+> For the complete SDK reference — every class, every argument,
+> from first detection to extending the framework — see the
+> **[SDK Book](SDK_BOOK.md)**. This section is the short tour.
 
 The high-level API is one class — full reference with every argument documented:
 [`docs/sdk.md`](docs/sdk.md).

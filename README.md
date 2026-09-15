@@ -18,8 +18,9 @@ modern computer-vision engineering practices while remaining self-contained.
 > [`docs/architecture.md`](docs/architecture.md) for the subsystem map and
 > [`CHANGELOG.md`](CHANGELOG.md) for release history.
 
-📖 **New here? Read the [Operator's Manual](MANUAL.md)** — a complete, step-by-step guide to
-installing, training, exporting, deploying, and troubleshooting LOFOP.
+📖 **New here?** Read the [Operator's Manual](MANUAL.md) for installing, training, exporting
+and troubleshooting — or the **[SDK Book](SDK_BOOK.md)** for the complete Python API, from
+your first detection through tracking, NMS-free models, deployment and extending LOFOP.
 
 ## What works today
 
